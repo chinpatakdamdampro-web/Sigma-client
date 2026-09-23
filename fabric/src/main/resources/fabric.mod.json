@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "spectral",
+  "version": "${version}",
+  "name": "Spectral Client",
+  "description": "Utility client for Minecraft 1.21.1 Fabric — C++ ImGui frontend with JNI bridge",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [ "com.spectral.SpectralClient" ]
+  },
+  "mixins": [ "spectral.mixins.json" ],
+  "depends": {
+    "fabricloader": ">=0.15.11",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

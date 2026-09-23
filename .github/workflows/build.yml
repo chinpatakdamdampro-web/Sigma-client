@@ -1,0 +1,96 @@
+name: Build Spectral Client
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:   # lets you trigger it manually from the Actions tab
+
+jobs:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 1: Fabric mod → spectral-*.jar
+  # ────────────────────────────────────────────────────────────────────────────
+  fabric:
+    name: Fabric Mod (Java)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x fabric/gradlew
+
+      - name: Build JAR
+        run: ./gradlew build --no-daemon
+        working-directory: fabric
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectral-fabric-mod
+          path: fabric/build/libs/spectral-*.jar
+          if-no-files-found: error
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: C++ DLL → spectral_client.dll
+  # ────────────────────────────────────────────────────────────────────────────
+  client-dll:
+    name: Client DLL (C++)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # JDK needed only for its JNI headers (jni.h, jni_md.h)
+      - name: Set up JDK 21 (JNI headers)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # MinGW 64-bit — provides g++, make, and windres
+      - name: Set up MinGW
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      # ── Fetch third-party sources ──────────────────────────────────────────
+
+      - name: Clone ImGui v1.90.4
+        run: git clone --depth 1 --branch v1.90.4 https://github.com/ocornut/imgui.git client/extern/imgui
+
+      - name: Clone MinHook
+        run: git clone --depth 1 https://github.com/TsudaKageyu/minhook.git client/extern/minhook-src
+
+      # ── Configure + Build ──────────────────────────────────────────────────
+
+      - name: Configure CMake
+        run: >
+          cmake -S client -B client/build
+          -G "MinGW Makefiles"
+          -DCMAKE_BUILD_TYPE=Release
+          -DJDK_DIR="${{ env.JAVA_HOME }}"
+        shell: bash
+
+      - name: Build DLL
+        run: cmake --build client/build --config Release --parallel
+        shell: bash
+
+      # ── Upload ─────────────────────────────────────────────────────────────
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectral-client-dll
+          path: client/build/out/spectral_client.dll
+          if-no-files-found: error

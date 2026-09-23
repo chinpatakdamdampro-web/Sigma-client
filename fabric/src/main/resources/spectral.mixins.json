@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.spectral.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "WorldRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
