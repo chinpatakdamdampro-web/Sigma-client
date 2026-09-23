@@ -14,7 +14,6 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 
 /**
@@ -66,17 +65,16 @@ public final class HitboxRenderer {
             matrices.translate(rx, ry, rz);
 
             Matrix4f posM = matrices.peek().getPositionMatrix();
-            Matrix3f norM = matrices.peek().getNormalMatrix();
 
             float r = cfg.color[0], g = cfg.color[1],
                   b = cfg.color[2], a = cfg.color[3];
 
             // Draw outline
-            drawBox(lines, posM, norM, box, r, g, b, a);
+            drawBox(lines, posM, box, r, g, b, a);
 
             // Draw cross-hair at entity origin (style == Precise)
             if (cfg.style == 1) {
-                drawCrossHair(lines, posM, norM, r, g, b, a * .7f);
+                drawCrossHair(lines, posM, r, g, b, a * .7f);
             }
 
             matrices.pop();
@@ -94,39 +92,39 @@ public final class HitboxRenderer {
     }
 
     /** Draw all 12 edges of an AABB. */
-    private static void drawBox(VertexConsumer vc, Matrix4f pm, Matrix3f nm,
+    private static void drawBox(VertexConsumer vc, Matrix4f pm,
                                 Box b, float r, float g, float cr, float a) {
         float x0 = (float)b.minX, y0 = (float)b.minY, z0 = (float)b.minZ;
         float x1 = (float)b.maxX, y1 = (float)b.maxY, z1 = (float)b.maxZ;
 
         // Bottom ring
-        line(vc,pm,nm, x0,y0,z0, x1,y0,z0, r,g,cr,a);
-        line(vc,pm,nm, x1,y0,z0, x1,y0,z1, r,g,cr,a);
-        line(vc,pm,nm, x1,y0,z1, x0,y0,z1, r,g,cr,a);
-        line(vc,pm,nm, x0,y0,z1, x0,y0,z0, r,g,cr,a);
+        line(vc,pm, x0,y0,z0, x1,y0,z0, r,g,cr,a);
+        line(vc,pm, x1,y0,z0, x1,y0,z1, r,g,cr,a);
+        line(vc,pm, x1,y0,z1, x0,y0,z1, r,g,cr,a);
+        line(vc,pm, x0,y0,z1, x0,y0,z0, r,g,cr,a);
         // Top ring
-        line(vc,pm,nm, x0,y1,z0, x1,y1,z0, r,g,cr,a);
-        line(vc,pm,nm, x1,y1,z0, x1,y1,z1, r,g,cr,a);
-        line(vc,pm,nm, x1,y1,z1, x0,y1,z1, r,g,cr,a);
-        line(vc,pm,nm, x0,y1,z1, x0,y1,z0, r,g,cr,a);
+        line(vc,pm, x0,y1,z0, x1,y1,z0, r,g,cr,a);
+        line(vc,pm, x1,y1,z0, x1,y1,z1, r,g,cr,a);
+        line(vc,pm, x1,y1,z1, x0,y1,z1, r,g,cr,a);
+        line(vc,pm, x0,y1,z1, x0,y1,z0, r,g,cr,a);
         // Verticals
-        line(vc,pm,nm, x0,y0,z0, x0,y1,z0, r,g,cr,a);
-        line(vc,pm,nm, x1,y0,z0, x1,y1,z0, r,g,cr,a);
-        line(vc,pm,nm, x1,y0,z1, x1,y1,z1, r,g,cr,a);
-        line(vc,pm,nm, x0,y0,z1, x0,y1,z1, r,g,cr,a);
+        line(vc,pm, x0,y0,z0, x0,y1,z0, r,g,cr,a);
+        line(vc,pm, x1,y0,z0, x1,y1,z0, r,g,cr,a);
+        line(vc,pm, x1,y0,z1, x1,y1,z1, r,g,cr,a);
+        line(vc,pm, x0,y0,z1, x0,y1,z1, r,g,cr,a);
     }
 
     /** Small cross-hair cross at entity foot origin (for Precise style). */
-    private static void drawCrossHair(VertexConsumer vc, Matrix4f pm, Matrix3f nm,
+    private static void drawCrossHair(VertexConsumer vc, Matrix4f pm,
                                       float r, float g, float b, float a) {
         float s = .15f;
-        line(vc,pm,nm, -s,0,0, s,0,0, r,g,b,a);
-        line(vc,pm,nm, 0,-s,0, 0,s,0, r,g,b,a);
-        line(vc,pm,nm, 0,0,-s, 0,0,s, r,g,b,a);
+        line(vc,pm, -s,0,0, s,0,0, r,g,b,a);
+        line(vc,pm, 0,-s,0, 0,s,0, r,g,b,a);
+        line(vc,pm, 0,0,-s, 0,0,s, r,g,b,a);
     }
 
     /** Emit one line segment (two vertices required for RenderLayer.getLines). */
-    private static void line(VertexConsumer vc, Matrix4f pm, Matrix3f nm,
+    private static void line(VertexConsumer vc, Matrix4f pm,
                              float x0, float y0, float z0,
                              float x1, float y1, float z1,
                              float r, float g, float b, float a) {
@@ -134,7 +132,7 @@ public final class HitboxRenderer {
         float len = (float)Math.sqrt(dx*dx+dy*dy+dz*dz);
         if (len < 1e-6f) return;
         float nx = dx/len, ny = dy/len, nz = dz/len;
-        vc.vertex(pm, x0, y0, z0).color(r,g,b,a).normal(nm, nx,ny,nz);
-        vc.vertex(pm, x1, y1, z1).color(r,g,b,a).normal(nm, nx,ny,nz);
+        vc.vertex(pm, x0, y0, z0).color(r,g,b,a).normal(nx,ny,nz);
+        vc.vertex(pm, x1, y1, z1).color(r,g,b,a).normal(nx,ny,nz);
     }
 }
