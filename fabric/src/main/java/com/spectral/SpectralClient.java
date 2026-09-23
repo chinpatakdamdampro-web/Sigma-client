@@ -30,7 +30,7 @@ public class SpectralClient implements ClientModInitializer {
                 context.matrixStack(),
                 context.consumers(),
                 context.camera(),
-                context.tickDelta()
+                context.tickCounter().getTickDelta(true)
             );
         });
 
@@ -40,7 +40,7 @@ public class SpectralClient implements ClientModInitializer {
             NativeBridge.cleanup();
         });
 
-        LOGGER.info("[Spectral] Ready.");
+        LOGGER.info("[SparkGalaxyClient] Ready.");
     }
 
     public static SpectralClient getInstance() { return INSTANCE; }
