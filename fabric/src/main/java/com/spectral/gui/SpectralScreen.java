@@ -90,11 +90,9 @@ public class SpectralScreen extends Screen {
 
     public SpectralScreen() { super(Text.empty()); }
 
-    // ── Critical: disable Minecraft's blur shader ─────────────────────────────
-    @Override
-    public boolean hasBlurredBackground() { return false; }
-
-    // Don't let Minecraft draw its own background (prevents blur + dark overlay)
+    // Prevent Minecraft's blur shader and dark overlay.
+    // In 1.21.1, renderBackground() is what triggers both — making it a no-op
+    // stops the blur from ever being scheduled.
     @Override
     public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) { }
 
