@@ -7,19 +7,9 @@ import net.minecraft.text.Text;
 
 import java.util.*;
 
-/**
- * Spectral Client in-game GUI.
- *
- * Opens when the keybind is pressed (default: INSERT, rebindable in Controls).
- * Works on all platforms — uses Java/Minecraft rendering, no C++ required.
- * When the native bridge IS loaded, module toggles sync to the C++ side too.
- */
 public class SpectralScreen extends Screen {
 
     // ── Module registry ───────────────────────────────────────────────────────
-    // Java-side module state — used when native bridge isn't loaded, and as
-    // the source of truth for the GUI regardless.
-
     private static final Map<String, List<String>> CATEGORY_MODULES = new LinkedHashMap<>();
     private static final Map<String, Boolean>      MODULE_STATES    = new HashMap<>();
 
@@ -45,221 +35,266 @@ public class SpectralScreen extends Screen {
             "Anti FBL","Blink","Creative Tabs","Disabler","Join Claim","More Packets",
             "Player Detect","PvP Hangout Parkour","Silent Range","Simulation Test"
         ));
-
         for (List<String> mods : CATEGORY_MODULES.values())
             for (String m : mods)
                 MODULE_STATES.put(m, false);
     }
 
-    /**
-     * Called by SpectralClient's render hook.
-     * Prefers native bridge state if available, falls back to Java state.
-     */
     public static boolean isModuleActive(String name) {
         if (NativeBridge.isLoaded())
             return NativeBridge.isModuleEnabled(name.toLowerCase().replace(" ", "_"));
         return MODULE_STATES.getOrDefault(name, false);
     }
 
-    // ── Layout constants ──────────────────────────────────────────────────────
-    private static final int W  = 760;
-    private static final int H  = 480;
-    private static final int SW = 160;   // sidebar width
-    private static final int LW = 215;   // module list width
-    // config panel = W - SW - LW = 385px
-
     // ── Colors (ARGB) ─────────────────────────────────────────────────────────
-    private static final int C_BG     = 0xF2100B1E;
-    private static final int C_SIDE   = 0xF2150E28;
-    private static final int C_PANEL  = 0xF2120D22;
-    private static final int C_PURPLE = 0xFF8B5CF6;
-    private static final int C_PINK   = 0xFFEC4899;
-    private static final int C_TEXT   = 0xFFE2E8F0;
-    private static final int C_DIM    = 0xFF94A3B8;
-    private static final int C_MUTE   = 0xFF475569;
-    private static final int C_DIV    = 0x30FFFFFF;
-    private static final int C_HOV    = 0x18FFFFFF;
-    private static final int C_SEL    = 0x28C084FC;
+    // Background layers
+    private static final int BG_OVERLAY  = 0xCC050210;   // full-screen dim
+    private static final int BG_PANEL    = 0xFF0D0A1F;   // main panel
+    private static final int BG_HEADER   = 0xFF120E2B;   // header bar
+    private static final int BG_SIDEBAR  = 0xFF0F0B22;   // sidebar
+    private static final int BG_MOD_EVEN = 0xFF0D0A1F;   // module row even
+    private static final int BG_MOD_ODD  = 0xFF110E24;   // module row odd
+    private static final int BG_HOVER    = 0x25C084FC;   // row hover
+    private static final int BG_CAT_ACT  = 0x35C084FC;   // active category
+    private static final int BG_CAT_HOV  = 0x18FFFFFF;   // hovered category
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    // Accents
+    private static final int PURPLE      = 0xFF8B5CF6;
+    private static final int PINK        = 0xFFEC4899;
+    private static final int PURPLE_DIM  = 0xFF6D3FD4;
+    private static final int GREEN       = 0xFF22C55E;
+
+    // Text
+    private static final int TEXT_WHITE  = 0xFFE2E8F0;
+    private static final int TEXT_DIM    = 0xFF94A3B8;
+    private static final int TEXT_MUTE   = 0xFF475569;
+    private static final int TEXT_PURPLE = 0xFFBBA7FF;
+
+    // Borders / dividers
+    private static final int DIV         = 0xFF1E1A38;
+    private static final int BORDER      = 0xFF2D2850;
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    private static final int HEADER_H = 28;
+    private static final int FOOTER_H = 22;
+    private static final int SIDEBAR_W = 130;
+    private static final int CAT_ITEM_H = 38;
+    private static final int MOD_ITEM_H = 36;
+
+    private int panelX, panelY, panelW, panelH;
+
     private final String[] catNames = CATEGORY_MODULES.keySet().toArray(new String[0]);
     private int    selCat  = 0;
     private String selMod  = null;
     private int    scrollY = 0;
 
-    // Panel top-left in screen space
-    private int px, py;
+    public SpectralScreen() { super(Text.empty()); }
 
-    // ── Constructor ───────────────────────────────────────────────────────────
+    // ── Critical: disable Minecraft's blur shader ─────────────────────────────
+    @Override
+    public boolean hasBlurredBackground() { return false; }
 
-    public SpectralScreen() {
-        super(Text.empty());
-    }
+    // Don't let Minecraft draw its own background (prevents blur + dark overlay)
+    @Override
+    public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) { }
 
     @Override
-    public boolean shouldPause() {
-        return false;   // keep the game running while the menu is open
-    }
+    public boolean shouldPause() { return false; }
 
     @Override
     protected void init() {
-        px = (width  - W) / 2;
-        py = (height - H) / 2;
+        // Use ~90% of screen width/height so it feels full
+        panelW = Math.min(width  - 20, 820);
+        panelH = Math.min(height - 20, 520);
+        panelX = (width  - panelW) / 2;
+        panelY = (height - panelH) / 2;
+        scrollY = 0;
     }
 
-    // ── Render ────────────────────────────────────────────────────────────────
-
+    // ── Main render ───────────────────────────────────────────────────────────
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
-        // World-dimming overlay
-        ctx.fill(0, 0, width, height, 0x88000000);
 
-        // ── Panel background ─────────────────────────────────────────────────
-        ctx.fill(px, py, px+W, py+H, C_BG);
+        // 1. Full-screen dark overlay (our own, not MC's blur)
+        ctx.fill(0, 0, width, height, BG_OVERLAY);
 
-        // Thin top accent line (purple → pink)
-        ctx.fill(px,        py, px+W/2,    py+2, C_PURPLE);
-        ctx.fill(px+W/2,    py, px+W,      py+2, C_PINK);
+        // 2. Outer border glow (1px bright border around panel)
+        ctx.fill(panelX - 1, panelY - 1, panelX + panelW + 1, panelY + panelH + 1, BORDER);
 
-        // ── Sidebar ──────────────────────────────────────────────────────────
-        ctx.fill(px, py, px+SW, py+H, C_SIDE);
-        ctx.fill(px+SW, py, px+SW+1, py+H, C_DIV);
+        // 3. Main panel background
+        ctx.fill(panelX, panelY, panelX + panelW, panelY + panelH, BG_PANEL);
 
-        // Logo
-        ctx.drawText(textRenderer, "✦ SPECTRAL", px+14, py+14, C_PURPLE, true);
-        ctx.drawText(textRenderer, "v1.0.0", px+14, py+26, C_MUTE, false);
-        ctx.fill(px+10, py+42, px+SW-10, py+43, C_DIV);
+        // 4. Two-pixel top accent: purple left half, pink right half
+        ctx.fill(panelX,           panelY, panelX + panelW / 2, panelY + 2, PURPLE);
+        ctx.fill(panelX + panelW / 2, panelY, panelX + panelW, panelY + 2, PINK);
 
-        // Category buttons
-        for (int i = 0; i < catNames.length; i++) {
-            renderCategoryButton(ctx, i, mx, my);
-        }
-
-        // ── Module list ───────────────────────────────────────────────────────
+        renderHeader(ctx);
+        renderSidebar(ctx, mx, my);
         renderModuleList(ctx, mx, my);
-        ctx.fill(px+SW+LW, py, px+SW+LW+1, py+H, C_DIV);
+        renderFooter(ctx);
 
-        // ── Config panel ──────────────────────────────────────────────────────
-        renderConfigPanel(ctx, mx, my);
-
-        // ── Footer ───────────────────────────────────────────────────────────
-        ctx.fill(px, py+H-20, px+W, py+H-19, C_DIV);
-        ctx.drawText(textRenderer, "INSERT / ESC to close  •  Click module to toggle",
-            px+10, py+H-13, C_MUTE, false);
-
-        String nativeTxt = NativeBridge.isLoaded() ? "● Native" : "● Java-only";
-        int    nativeCol = NativeBridge.isLoaded() ? C_PURPLE : 0xFFEF4444;
-        int    nativeX   = px + W - textRenderer.getWidth(nativeTxt) - 10;
-        ctx.drawText(textRenderer, nativeTxt, nativeX, py+H-13, nativeCol, false);
-
+        // Let Screen render any registered widgets (none currently)
         super.render(ctx, mx, my, delta);
     }
 
-    private void renderCategoryButton(DrawContext ctx, int i, int mx, int my) {
-        int bx = px+8, by = py+52 + i*44;
-        int bw = SW-16, bh = 36;
-        boolean active  = i == selCat;
-        boolean hovered = mx>=bx && mx<=bx+bw && my>=by && my<=by+bh;
+    // ── Header ────────────────────────────────────────────────────────────────
+    private void renderHeader(DrawContext ctx) {
+        int hx = panelX, hy = panelY + 2;
+        ctx.fill(hx, hy, hx + panelW, hy + HEADER_H, BG_HEADER);
+        // Bottom border on header
+        ctx.fill(hx, hy + HEADER_H, hx + panelW, hy + HEADER_H + 1, DIV);
 
-        if (active)       ctx.fill(bx, by, bx+bw, by+bh, C_SEL);
-        else if (hovered) ctx.fill(bx, by, bx+bw, by+bh, C_HOV);
+        // Logo (bold with shadow for depth)
+        ctx.drawText(textRenderer, "✦ SPECTRAL", hx + 12, hy + 9, PURPLE, true);
 
-        if (active) ctx.fill(bx, by+4, bx+3, by+bh-4, C_PURPLE);
+        // Right side: native status
+        boolean native_ = NativeBridge.isLoaded();
+        String  status   = native_ ? "● Native active" : "● Java mode";
+        int     statusC  = native_ ? GREEN : TEXT_DIM;
+        int     statusX  = hx + panelW - textRenderer.getWidth(status) - 12;
+        ctx.drawText(textRenderer, status, statusX, hy + 9, statusC, false);
+    }
 
-        int col = active ? C_TEXT : (hovered ? C_TEXT : C_DIM);
-        ctx.drawText(textRenderer, catNames[i], bx+12, by+12, col, false);
+    // ── Sidebar ───────────────────────────────────────────────────────────────
+    private void renderSidebar(DrawContext ctx, int mx, int my) {
+        int sx  = panelX;
+        int sy  = panelY + 2 + HEADER_H + 1;
+        int sh  = panelH - HEADER_H - FOOTER_H - 3;
 
-        // Badge: count of enabled modules in this category
-        long enabled = CATEGORY_MODULES.get(catNames[i]).stream()
-            .filter(m -> MODULE_STATES.getOrDefault(m, false)).count();
-        if (enabled > 0) {
-            String badge = String.valueOf(enabled);
-            int bLen = textRenderer.getWidth(badge);
-            int badgeX = bx + bw - bLen - 10;
-            ctx.fill(badgeX-4, by+9, badgeX+bLen+4, by+27, C_PURPLE);
-            ctx.drawText(textRenderer, badge, badgeX, by+12, 0xFFFFFFFF, false);
+        ctx.fill(sx, sy, sx + SIDEBAR_W, sy + sh, BG_SIDEBAR);
+        // Right border
+        ctx.fill(sx + SIDEBAR_W, sy, sx + SIDEBAR_W + 1, sy + sh, DIV);
+
+        // Section label
+        ctx.drawText(textRenderer, "CATEGORIES", sx + 10, sy + 8, TEXT_MUTE, false);
+
+        for (int i = 0; i < catNames.length; i++) {
+            int bx = sx + 6;
+            int by = sy + 22 + i * CAT_ITEM_H;
+            int bw = SIDEBAR_W - 12;
+            int bh = CAT_ITEM_H - 4;
+
+            boolean active  = i == selCat;
+            boolean hovered = mx >= bx && mx < bx + bw && my >= by && my < by + bh;
+
+            // Button background
+            if (active)       ctx.fill(bx, by, bx + bw, by + bh, BG_CAT_ACT);
+            else if (hovered) ctx.fill(bx, by, bx + bw, by + bh, BG_CAT_HOV);
+
+            // Left accent bar for active category
+            if (active) ctx.fill(bx, by + 3, bx + 3, by + bh - 3, PURPLE);
+
+            // Category name
+            int col = active ? TEXT_PURPLE : (hovered ? TEXT_WHITE : TEXT_DIM);
+            ctx.drawText(textRenderer, catNames[i], bx + 10, by + (bh - 8) / 2, col, false);
+
+            // Enabled-module count badge
+            long count = CATEGORY_MODULES.get(catNames[i]).stream()
+                .filter(m -> MODULE_STATES.getOrDefault(m, false)).count();
+            if (count > 0) {
+                String badge  = String.valueOf(count);
+                int badgeW    = textRenderer.getWidth(badge) + 8;
+                int badgeX    = bx + bw - badgeW - 2;
+                int badgeY    = by + (bh - 10) / 2;
+                ctx.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 12, PURPLE_DIM);
+                ctx.drawText(textRenderer, badge, badgeX + 4, badgeY + 2, TEXT_WHITE, false);
+            }
         }
     }
 
+    // ── Module list ───────────────────────────────────────────────────────────
     private void renderModuleList(DrawContext ctx, int mx, int my) {
-        List<String> mods = CATEGORY_MODULES.get(catNames[selCat]);
-        int lx     = px + SW + 6;
-        int lRight = px + SW + LW - 6;
-        int top    = py + 8;
-        int bot    = py + H - 22;
+        int lx  = panelX + SIDEBAR_W + 1;
+        int ly  = panelY + 2 + HEADER_H + 1;
+        int lw  = panelW - SIDEBAR_W - 1;
+        int lh  = panelH - HEADER_H - FOOTER_H - 3;
 
-        ctx.enableScissor(px+SW, py, px+SW+LW, py+H);
+        List<String> mods = CATEGORY_MODULES.get(catNames[selCat]);
+
+        // Header bar showing category name
+        ctx.fill(lx, ly, lx + lw, ly + 20, BG_HEADER);
+        ctx.drawText(textRenderer, catNames[selCat].toUpperCase(),
+            lx + 10, ly + 6, TEXT_MUTE, false);
+        ctx.fill(lx, ly + 20, lx + lw, ly + 21, DIV);
+
+        // Clip to module area
+        int clipTop    = ly + 21;
+        int clipBottom = ly + lh;
+        ctx.enableScissor(lx, clipTop, lx + lw, clipBottom);
 
         for (int i = 0; i < mods.size(); i++) {
-            String mod     = mods.get(i);
-            boolean active = MODULE_STATES.getOrDefault(mod, false);
-            int iy = top + i * 40 - scrollY;
-            if (iy + 36 < top || iy > bot) continue;
+            String  mod     = mods.get(i);
+            boolean enabled = MODULE_STATES.getOrDefault(mod, false);
+            int     iy      = clipTop + i * MOD_ITEM_H - scrollY;
 
-            boolean hovered  = mx>=lx && mx<=lRight && my>=iy && my<=iy+36;
+            if (iy + MOD_ITEM_H < clipTop || iy > clipBottom) continue;
+
+            boolean hovered  = mx >= lx && mx < lx + lw && my >= iy && my < iy + MOD_ITEM_H;
             boolean selected = mod.equals(selMod);
 
-            if (hovered || selected) ctx.fill(lx, iy, lRight, iy+36, C_HOV);
-            if (active)              ctx.fill(lx, iy, lx+3,   iy+36, C_PURPLE);
+            // Row background (alternating + hover/select tint)
+            int rowBg = (i % 2 == 0) ? BG_MOD_EVEN : BG_MOD_ODD;
+            ctx.fill(lx, iy, lx + lw, iy + MOD_ITEM_H, rowBg);
+            if (hovered || selected)
+                ctx.fill(lx, iy, lx + lw, iy + MOD_ITEM_H, BG_HOVER);
 
-            ctx.drawText(textRenderer, mod, lx+10, iy+7,  active ? C_TEXT   : C_DIM,  false);
-            ctx.drawText(textRenderer, active ? "ON" : "OFF",
-                                              lx+10, iy+20, active ? C_PURPLE : C_MUTE, false);
+            // Left accent stripe if enabled
+            if (enabled) ctx.fill(lx, iy, lx + 3, iy + MOD_ITEM_H, PURPLE);
+
+            // Module name
+            ctx.drawText(textRenderer, mod,
+                lx + 12, iy + 8, enabled ? TEXT_WHITE : TEXT_DIM, false);
+
+            // ON / OFF pill on the right
+            String pill  = enabled ? "ON"  : "OFF";
+            int    pillC = enabled ? PURPLE : TEXT_MUTE;
+            int    pillW = textRenderer.getWidth(pill) + 14;
+            int    pillX = lx + lw - pillW - 8;
+            int    pillY = iy + (MOD_ITEM_H - 14) / 2;
+            ctx.fill(pillX, pillY, pillX + pillW, pillY + 14,
+                enabled ? 0x40C084FC : 0x25FFFFFF);
+            ctx.drawText(textRenderer, pill, pillX + 7, pillY + 3, pillC, false);
+
+            // Row divider
+            ctx.fill(lx + 4, iy + MOD_ITEM_H - 1, lx + lw - 4, iy + MOD_ITEM_H, DIV);
         }
 
         ctx.disableScissor();
 
-        // Scroll indicator dots if list overflows
-        int totalH = mods.size() * 40;
-        int visible = bot - top;
-        if (totalH > visible) {
-            float frac  = (float) scrollY / (totalH - visible);
-            int   barH  = Math.max(20, visible * visible / totalH);
-            int   barY  = py + 8 + (int)((H - 30 - barH) * frac);
-            ctx.fill(px+SW+LW-5, barY, px+SW+LW-2, barY+barH, C_MUTE);
+        // Scrollbar
+        int totalH  = mods.size() * MOD_ITEM_H;
+        int viewH   = clipBottom - clipTop;
+        if (totalH > viewH) {
+            float frac  = (float) scrollY / (totalH - viewH);
+            int   barH  = Math.max(24, viewH * viewH / totalH);
+            int   barY  = clipTop + (int)((viewH - barH) * frac);
+            ctx.fill(lx + lw - 4, clipTop,  lx + lw - 2, clipBottom, 0x20FFFFFF);
+            ctx.fill(lx + lw - 4, barY, lx + lw - 2, barY + barH, PURPLE_DIM);
         }
     }
 
-    private void renderConfigPanel(DrawContext ctx, int mx, int my) {
-        ctx.fill(px+SW+LW+1, py, px+W, py+H, C_PANEL);
-        int cpx = px + SW + LW + 16;
-        int cpy = py;
-
-        if (selMod == null) {
-            String hint = "Select a module";
-            int hx = cpx + (W - SW - LW - textRenderer.getWidth(hint)) / 2;
-            ctx.drawText(textRenderer, hint, hx, cpy + H/2, C_MUTE, false);
-            return;
-        }
-
-        boolean en = MODULE_STATES.getOrDefault(selMod, false);
-
-        // Module name + state
-        ctx.drawText(textRenderer, selMod, cpx, cpy+18, C_TEXT, true);
-        ctx.fill(cpx, cpy+32, cpx+textRenderer.getWidth(selMod), cpy+33, en ? C_PURPLE : C_MUTE);
-
-        // Toggle pill button
-        int btnX = cpx, btnY = cpy+42, btnW = 90, btnH = 22;
-        boolean hovBtn = mx>=btnX && mx<=btnX+btnW && my>=btnY && my<=btnY+btnH;
-        ctx.fill(btnX, btnY, btnX+btnW, btnY+btnH, en ? C_PURPLE : (hovBtn ? C_SEL : 0x30FFFFFF));
-        String btnLbl = en ? "● Enabled" : "○ Disabled";
-        ctx.drawText(textRenderer, btnLbl, btnX+8, btnY+7, en ? 0xFFFFFFFF : C_DIM, false);
-
-        ctx.fill(cpx, cpy+74, px+W-16, cpy+75, C_DIV);
-        ctx.drawText(textRenderer, "Config coming soon", cpx, cpy+84, C_MUTE, false);
+    // ── Footer ────────────────────────────────────────────────────────────────
+    private void renderFooter(DrawContext ctx) {
+        int fy = panelY + panelH - FOOTER_H;
+        ctx.fill(panelX, fy, panelX + panelW, fy + 1, DIV);
+        ctx.fill(panelX, fy + 1, panelX + panelW, panelY + panelH, BG_HEADER);
+        ctx.drawText(textRenderer,
+            "Click module to toggle  •  Scroll to browse  •  ESC / INSERT to close",
+            panelX + 10, fy + 7, TEXT_MUTE, false);
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
-
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button != 0) return super.mouseClicked(mx, my, button);
         int ix = (int) mx, iy = (int) my;
 
-        // Category buttons
+        // Category sidebar clicks
+        int sx = panelX + 6;
+        int sy = panelY + 2 + HEADER_H + 1 + 22;
         for (int i = 0; i < catNames.length; i++) {
-            int bx = px+8, by = py+52 + i*44;
-            if (ix>=bx && ix<=bx+SW-16 && iy>=by && iy<=by+36) {
+            int by = sy + i * CAT_ITEM_H;
+            if (ix >= sx && ix < sx + SIDEBAR_W - 12 && iy >= by && iy < by + CAT_ITEM_H - 4) {
                 selCat  = i;
                 selMod  = null;
                 scrollY = 0;
@@ -267,27 +302,22 @@ public class SpectralScreen extends Screen {
             }
         }
 
-        // Toggle button in config panel
-        if (selMod != null) {
-            int btnX = px+SW+LW+16, btnY = py+42;
-            if (ix>=btnX && ix<=btnX+90 && iy>=btnY && iy<=btnY+22) {
-                toggleModule(selMod);
-                return true;
-            }
-        }
-
         // Module list clicks
-        List<String> mods = CATEGORY_MODULES.get(catNames[selCat]);
-        int lx = px+SW+6, lRight = px+SW+LW-6;
-        for (int i = 0; i < mods.size(); i++) {
-            String mod = mods.get(i);
-            int modY = py+8 + i*40 - scrollY;
-            if (ix>=lx && ix<=lRight && iy>=modY && iy<=modY+36) {
-                if (mod.equals(selMod)) {
-                    toggleModule(mod);   // double-click area also toggles
-                } else {
-                    selMod = mod;
-                }
+        int lx       = panelX + SIDEBAR_W + 1;
+        int clipTop  = panelY + 2 + HEADER_H + 22;
+        int clipBot  = panelY + panelH - FOOTER_H;
+        int lw       = panelW - SIDEBAR_W - 1;
+        if (ix >= lx && ix < lx + lw && iy >= clipTop && iy < clipBot) {
+            List<String> mods = CATEGORY_MODULES.get(catNames[selCat]);
+            int rel = iy - clipTop + scrollY;
+            int idx = rel / MOD_ITEM_H;
+            if (idx >= 0 && idx < mods.size()) {
+                String mod = mods.get(idx);
+                selMod = mod;
+                boolean next = !MODULE_STATES.getOrDefault(mod, false);
+                MODULE_STATES.put(mod, next);
+                if (NativeBridge.isLoaded())
+                    NativeBridge.setModuleEnabled(mod.toLowerCase().replace(" ","_"), next);
                 return true;
             }
         }
@@ -297,24 +327,13 @@ public class SpectralScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double hAmt, double vAmt) {
-        // Only scroll when mouse is over the module list
-        if (mx >= px+SW && mx <= px+SW+LW) {
-            List<String> mods = CATEGORY_MODULES.get(catNames[selCat]);
-            int maxScroll = Math.max(0, mods.size() * 40 - (H - 30));
-            scrollY = Math.max(0, Math.min(maxScroll, scrollY - (int)(vAmt * 14)));
+        int lx = panelX + SIDEBAR_W + 1;
+        if (mx >= lx) {
+            List<String> mods  = CATEGORY_MODULES.get(catNames[selCat]);
+            int viewH   = panelH - HEADER_H - FOOTER_H - 24;
+            int maxScroll = Math.max(0, mods.size() * MOD_ITEM_H - viewH);
+            scrollY = (int) Math.max(0, Math.min(maxScroll, scrollY - vAmt * 18));
         }
         return true;
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private void toggleModule(String name) {
-        boolean next = !MODULE_STATES.getOrDefault(name, false);
-        MODULE_STATES.put(name, next);
-
-        // Sync to C++ if the native bridge is active
-        if (NativeBridge.isLoaded()) {
-            NativeBridge.setModuleEnabled(name.toLowerCase().replace(" ", "_"), next);
-        }
     }
 }
